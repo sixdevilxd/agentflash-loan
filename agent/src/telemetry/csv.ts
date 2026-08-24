@@ -1,30 +1,41 @@
 import { appendFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { SYMBOL } from "../chain/addresses.js";
-import type { Observation } from "../scanner/dexArb.js";
+import type { Opportunity } from "../profit/engine.js";
 
 const HEADER = [
   "ts",
   "block",
-  "base",
-  "quote",
+  "tokenIn",
+  "tokenOut",
   "size",
-  "buyVenue",
-  "sellVenue",
-  "grossBps",
-  "grossWei",
-  "flashFeeWei",
-  "netBeforeGasWei",
+  "dexA",
+  "dexB",
+  "expectedOutput",
+  "amountBack",
+  "grossProfitWei",
+  "flashLoanFeeWei",
+  "slippageBps",
+  "priceImpactBps",
   "gasEstimate",
   "gasCostWei",
-  "netAfterGasWei",
-  "wouldFire",
+  "sponsorship",
+  "netSelfFundedWei",
+  "netSponsoredWei",
+  "minimumProfitWei",
+  "safetyMarginWei",
+  "verdict",
+  "fireSelfFunded",
+  "fireSponsored",
 ].join(",");
 
 /**
- * Append-only CSV. This file IS the deliverable of Phase 0 -- after a couple of
- * weeks it answers the only question that matters: does a spread exist on this
- * chain, at these sizes, that survives fees and gas?
+ * Append-only CSV -- the actual deliverable of Phase 0.
+ *
+ * Both profit lines are recorded on every row: what the trade nets if we pay
+ * gas, and what it nets if a paymaster covers it. They diverge most at small
+ * sizes, where gas is a large share of a thin spread, so keeping both means the
+ * data answers "does sponsorship change the answer?" without a second run.
  */
 export class CsvLog {
   constructor(private path: string) {
@@ -32,27 +43,32 @@ export class CsvLog {
     if (!existsSync(path)) writeFileSync(path, HEADER + "\n");
   }
 
-  write(
-    o: Observation,
-    extra: { gasEstimate: bigint; gasCostWei: bigint; wouldFire: boolean },
-  ): void {
-    const netAfterGas = o.netBeforeGasWei - extra.gasCostWei;
+  write(block: bigint, o: Opportunity): void {
+    const required = o.minimumProfitWei + o.safetyMarginWei;
     const row = [
       new Date().toISOString(),
-      o.blockNumber,
-      SYMBOL[o.base] ?? o.base,
-      SYMBOL[o.quote] ?? o.quote,
-      o.amountIn,
-      o.buyVenue,
-      o.sellVenue,
-      o.grossBps,
-      o.grossWei,
-      o.flashFeeWei,
-      o.netBeforeGasWei,
-      extra.gasEstimate,
-      extra.gasCostWei,
-      netAfterGas,
-      extra.wouldFire ? "1" : "0",
+      block,
+      SYMBOL[o.tokenIn] ?? o.tokenIn,
+      SYMBOL[o.tokenOut] ?? o.tokenOut,
+      o.flashLoanAmount,
+      o.dexA,
+      o.dexB,
+      o.expectedOutput,
+      o.amountBack,
+      o.grossProfitWei,
+      o.flashLoanFeeWei,
+      o.slippageBps,
+      o.priceImpactBps,
+      o.gas.estimate,
+      o.gas.costWei,
+      o.gas.status,
+      o.netSelfFundedWei,
+      o.netSponsoredWei,
+      o.minimumProfitWei,
+      o.safetyMarginWei,
+      o.verdict,
+      o.netSelfFundedWei >= required ? "1" : "0",
+      o.netSponsoredWei >= required ? "1" : "0",
     ].join(",");
     appendFileSync(this.path, row + "\n");
   }
