@@ -6,6 +6,7 @@
   "scripts": {
     "observe": "tsx src/observe.ts",
     "verify:addresses": "tsx src/verifyAddresses.ts",
+    "deploy": "tsx src/deploySponsored.ts",
     "live": "tsx src/index.ts",
     "typecheck": "tsc --noEmit"
   },
