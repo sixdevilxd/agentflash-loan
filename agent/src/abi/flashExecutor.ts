@@ -44,6 +44,17 @@ export const flashExecutorAbi = [
     inputs: [{ type: "address" }],
     outputs: [{ type: "uint256" }],
   },
+  // --- admin surface ---
+  { type: "function", name: "setTarget", stateMutability: "nonpayable", inputs: [{ name: "target", type: "address" }, { name: "allowed", type: "bool" }], outputs: [] },
+  { type: "function", name: "setMaxLoan", stateMutability: "nonpayable", inputs: [{ name: "asset", type: "address" }, { name: "cap", type: "uint256" }], outputs: [] },
+  { type: "function", name: "grantRole", stateMutability: "nonpayable", inputs: [{ name: "role", type: "bytes32" }, { name: "account", type: "address" }], outputs: [] },
+  { type: "function", name: "renounceRole", stateMutability: "nonpayable", inputs: [{ name: "role", type: "bytes32" }, { name: "account", type: "address" }], outputs: [] },
+  { type: "function", name: "hasRole", stateMutability: "view", inputs: [{ name: "role", type: "bytes32" }, { name: "account", type: "address" }], outputs: [{ type: "bool" }] },
+  { type: "function", name: "allowedTarget", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "bool" }] },
+  { type: "function", name: "OPERATOR_ROLE", stateMutability: "view", inputs: [], outputs: [{ type: "bytes32" }] },
+  { type: "function", name: "GUARDIAN_ROLE", stateMutability: "view", inputs: [], outputs: [{ type: "bytes32" }] },
+  { type: "function", name: "DEFAULT_ADMIN_ROLE", stateMutability: "view", inputs: [], outputs: [{ type: "bytes32" }] },
+
   { type: "error", name: "ProfitBelowMin", inputs: [{ name: "have", type: "uint256" }, { name: "need", type: "uint256" }] },
   { type: "error", name: "TargetNotAllowed", inputs: [{ name: "target", type: "address" }] },
   { type: "error", name: "LoanExceedsCap", inputs: [{ name: "asset", type: "address" }, { name: "amount", type: "uint256" }, { name: "cap", type: "uint256" }] },
