@@ -1,6 +1,6 @@
 import { createPublicClient, http } from "viem";
 import { base } from "viem/chains";
-import { config } from "./config.js";
+import { config, requireTradingConfig } from "./config.js";
 import { observe, describe, PAIR_WETH_USDC } from "./scanner/dexArb.js";
 import { screen } from "./risk/guards.js";
 import { operatorAddress } from "./exec/direct.js";
@@ -29,6 +29,9 @@ function buildPlan(): never {
 }
 
 async function main() {
+  // Phase 1 moves money. Refuse to start without caps configured.
+  requireTradingConfig();
+
   const client = createPublicClient({ chain: base, transport: http(config.rpcUrl) });
   const operator = operatorAddress();
 
