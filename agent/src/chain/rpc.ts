@@ -84,3 +84,29 @@ export async function mapLimit<T, R>(
   await Promise.all(workers);
   return out;
 }
+
+/**
+ * Poll until a predicate holds.
+ *
+ * Needed because a UserOperation receipt does not guarantee the state it
+ * produced is readable yet. Load-balanced RPCs answer from whichever node
+ * takes the request, and the bundler's write path is not the node you read
+ * from -- so an immediate read after a successful deploy can legitimately
+ * return nothing. Treating that as failure reports a working deployment as
+ * broken, which is exactly what happened on the first real deploy.
+ */
+export async function pollUntil<T>(
+  read: () => Promise<T>,
+  done: (value: T) => boolean,
+  opts: { attempts?: number; delayMs?: number } = {},
+): Promise<{ ok: boolean; value: T }> {
+  const attempts = opts.attempts ?? 6;
+  const delayMs = opts.delayMs ?? 2_000;
+
+  let value = await read();
+  for (let i = 0; i < attempts && !done(value); i++) {
+    await sleep(delayMs);
+    value = await read();
+  }
+  return { ok: done(value), value };
+}
