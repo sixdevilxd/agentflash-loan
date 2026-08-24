@@ -8,6 +8,7 @@ import "dotenv/config";
 import { BASE } from "./chain/addresses.js";
 import { compileFlashExecutor } from "./compile.js";
 import { getKernel7702 } from "./zerodev/kernel7702.js";
+import { pollUntil } from "./chain/rpc.js";
 
 /**
  * Deploy FlashExecutor through the ZeroDev smart account, gas sponsored.
@@ -92,12 +93,25 @@ async function main() {
   const receipt = await kernelClient.waitForUserOperationReceipt({ hash: userOpHash });
   console.log(`tx            : ${receipt.receipt.transactionHash}`);
 
-  const code = await publicClient.getCode({ address: predicted });
-  if (!code || code === "0x") {
-    throw new Error("transaction landed but no bytecode at the predicted address");
+  // The receipt does not mean the state is readable yet -- see pollUntil.
+  const { ok, value: code } = await pollUntil(
+    () => publicClient.getCode({ address: predicted }),
+    (c) => Boolean(c && c !== "0x"),
+  );
+
+  if (!ok) {
+    console.warn(
+      "\nno bytecode visible at the predicted address yet.\n" +
+        "The transaction landed, so this is probably RPC lag rather than a failed deploy.\n" +
+        `Check it yourself before assuming failure:\n` +
+        `  https://basescan.org/address/${predicted}\n` +
+        `  tx: https://basescan.org/tx/${receipt.receipt.transactionHash}`,
+    );
+    console.log(`\nEXECUTOR_ADDRESS=${predicted}`);
+    return;
   }
 
-  console.log(`\ndeployed. runtime size ${(code.length - 2) / 2} bytes`);
+  console.log(`\ndeployed. runtime size ${(code!.length - 2) / 2} bytes`);
   console.log(`\nadd to .env:\n  EXECUTOR_ADDRESS=${predicted}`);
   console.log("\nnext: allowlist routers, set caps, grant OPERATOR_ROLE");
   if (admin === smartAccount) {

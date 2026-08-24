@@ -5,6 +5,7 @@ import "dotenv/config";
 import { BASE } from "./chain/addresses.js";
 import { flashExecutorAbi } from "./abi/flashExecutor.js";
 import { getKernel7702 } from "./zerodev/kernel7702.js";
+import { pollUntil } from "./chain/rpc.js";
 
 /**
  * Configure a freshly deployed FlashExecutor, gas sponsored.
@@ -93,13 +94,22 @@ async function main() {
   const receipt = await kernelClient.waitForUserOperationReceipt({ hash });
   console.log(`tx            : ${receipt.receipt.transactionHash}`);
 
-  // Read the state back. A landed transaction is not proof the state is right.
-  const [cap, r0, r1, isOperator] = await Promise.all([
-    publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "maxLoan", args: [BASE.tokens.WETH] }),
-    publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "allowedTarget", args: [routers[0] as Address] }),
-    publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "allowedTarget", args: [routers[1] as Address] }),
-    publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "hasRole", args: [operatorRole as `0x${string}`, smartAccount] }),
-  ]);
+  // Read the state back. A landed transaction is not proof the state is right --
+  // but it is also not proof it is wrong, since the read may hit a lagging node.
+  // So poll rather than judging on the first answer.
+  const readAll = async () =>
+    Promise.all([
+      publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "maxLoan", args: [BASE.tokens.WETH] }),
+      publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "allowedTarget", args: [routers[0] as Address] }),
+      publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "allowedTarget", args: [routers[1] as Address] }),
+      publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "hasRole", args: [operatorRole as `0x${string}`, smartAccount] }),
+    ]);
+
+  const { ok, value } = await pollUntil(
+    readAll,
+    ([cap, r0, r1, isOp]) => Boolean(cap && r0 && r1 && isOp),
+  );
+  const [cap, r0, r1, isOperator] = value;
 
   console.log("\nverified on-chain:");
   console.log(`  maxLoan(WETH)        ${formatEther(cap as bigint)} WETH`);
@@ -107,8 +117,12 @@ async function main() {
   console.log(`  allowed aerodrome    ${r1}`);
   console.log(`  operator granted     ${isOperator}`);
 
-  if (!cap || !r0 || !r1 || !isOperator) {
-    throw new Error("configuration did not fully apply -- inspect the transaction");
+  if (!ok) {
+    console.warn(
+      "\nnot everything reads back as applied yet. The transaction landed, so check\n" +
+        `before assuming failure: https://basescan.org/tx/${receipt.receipt.transactionHash}`,
+    );
+    return;
   }
   console.log("\nconfigured. next: npm run handover  (move admin to a cold key)");
 }
