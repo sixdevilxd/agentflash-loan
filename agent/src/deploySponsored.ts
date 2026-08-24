@@ -6,7 +6,7 @@ import { base } from "viem/chains";
 import "dotenv/config";
 
 import { BASE } from "./chain/addresses.js";
-import { FLASH_EXECUTOR_BYTECODE } from "./chain/flashExecutorBytecode.js";
+import { compileFlashExecutor } from "./compile.js";
 import { getKernel7702 } from "./zerodev/kernel7702.js";
 
 /**
@@ -52,8 +52,11 @@ async function main() {
   const admin = (process.env.ADMIN_ADDRESS ?? smartAccount) as Address;
   const guardian = (process.env.GUARDIAN_ADDRESS ?? smartAccount) as Address;
 
+  const { bytecode, runtimeSize } = compileFlashExecutor();
+  console.log(`compiled      : runtime ${runtimeSize} bytes (EIP-170 limit 24576)`);
+
   const initCode = concat([
-    FLASH_EXECUTOR_BYTECODE as Hex,
+    bytecode,
     encodeAbiParameters(
       [{ type: "address" }, { type: "address" }, { type: "address" }, { type: "address" }],
       [BASE.flashloan.aaveV3Pool, BASE.flashloan.balancerVault, admin, guardian],
