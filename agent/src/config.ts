@@ -14,12 +14,15 @@ function req(name: string): string {
   return v;
 }
 
-function reqAddress(name: string): Address {
-  return getAddress(req(name));
-}
-
-function reqBigint(name: string): bigint {
-  const raw = req(name);
+/**
+ * Risk caps are mandatory before trading, but not before deploying. Enforcing
+ * them at import time would make it impossible to run deploySponsored, which by
+ * definition runs before any of them are known. requireTradingConfig() enforces
+ * them at the point where they actually matter.
+ */
+function optBigint(name: string): bigint {
+  const raw = process.env[name];
+  if (!raw) return 0n;
   if (!/^\d+$/.test(raw)) throw new Error(`${name} must be an integer (wei/base units), got "${raw}"`);
   return BigInt(raw);
 }
@@ -46,7 +49,15 @@ export const config = {
   // polling does not eat the ZeroDev credit allowance.
   rpcUrl: req("RPC_URL"),
 
-  executor: reqAddress("EXECUTOR_ADDRESS"),
+  /**
+   * NOT required at import time -- deploySponsored runs BEFORE this address
+   * exists. Requiring it here made deploying impossible: the script that
+   * produces the address could not start without the address.
+   * Enforced by requireTradingConfig() at the point of use instead.
+   */
+  executor: process.env.EXECUTOR_ADDRESS
+    ? getAddress(process.env.EXECUTOR_ADDRESS)
+    : ("0x0000000000000000000000000000000000000000" as Address),
 
   /**
    * Hot path = "direct": a plain EOA transaction, no bundler hop.
@@ -73,15 +84,15 @@ export const config = {
 
   risk: {
     /** Enforced on-chain too. This is the off-chain pre-filter. */
-    minProfitWei: reqBigint("MIN_PROFIT_WEI"),
+    minProfitWei: optBigint("MIN_PROFIT_WEI"),
     /** Hard ceiling per attempt, independent of the contract's own cap. */
-    maxLoanWei: reqBigint("MAX_LOAN_WEI"),
+    maxLoanWei: optBigint("MAX_LOAN_WEI"),
     /** Abort if estimated gas cost exceeds this share of expected profit. */
     maxGasShareOfProfit: num("MAX_GAS_SHARE_OF_PROFIT", 0.5),
     /** Stop everything after this many consecutive reverts. */
     maxConsecutiveFailures: num("MAX_CONSECUTIVE_FAILURES", 5),
     /** Upper bound on gas price we are willing to pay, in wei. */
-    maxFeePerGasWei: reqBigint("MAX_FEE_PER_GAS_WEI"),
+    maxFeePerGasWei: optBigint("MAX_FEE_PER_GAS_WEI"),
   },
 
   scanIntervalMs: num("SCAN_INTERVAL_MS", 2_000),
@@ -91,5 +102,22 @@ export const config = {
 } as const;
 
 if (config.execMode === "sponsored" && !config.zerodev.rpc) {
-  throw new Error('EXEC_MODE=sponsored requires ZERODEV_RPC');
+  throw new Error("EXEC_MODE=sponsored requires ZERODEV_RPC");
+}
+
+const ZERO = "0x0000000000000000000000000000000000000000";
+
+/** Call before anything that can move money. Deploy-time code must not. */
+export function requireTradingConfig(): void {
+  const missing: string[] = [];
+  if (config.executor === ZERO) missing.push("EXECUTOR_ADDRESS");
+  if (config.risk.minProfitWei === 0n) missing.push("MIN_PROFIT_WEI");
+  if (config.risk.maxLoanWei === 0n) missing.push("MAX_LOAN_WEI");
+  if (config.risk.maxFeePerGasWei === 0n) missing.push("MAX_FEE_PER_GAS_WEI");
+  if (missing.length) {
+    throw new Error(
+      `Refusing to trade without risk caps. Missing: ${missing.join(", ")}. ` +
+        "An unbounded bot is worse than one that will not start.",
+    );
+  }
 }
