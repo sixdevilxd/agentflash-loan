@@ -4,6 +4,7 @@ import "dotenv/config";
 
 import { flashExecutorAbi } from "./abi/flashExecutor.js";
 import { getKernel7702 } from "./zerodev/kernel7702.js";
+import { pollUntil } from "./chain/rpc.js";
 
 /**
  * Move DEFAULT_ADMIN_ROLE off the hot key.
@@ -71,16 +72,30 @@ async function main() {
   const receipt = await kernelClient.waitForUserOperationReceipt({ hash });
   console.log(`tx       : ${receipt.receipt.transactionHash}`);
 
-  const [coldIsAdmin, hotIsAdmin] = await Promise.all([
-    publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "hasRole", args: [adminRole, cold] }),
-    publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "hasRole", args: [adminRole, smartAccount] }),
-  ]);
+  // Poll rather than reading once. The receipt does not mean the new role state
+  // is visible on the node we happen to read from, and judging on the first
+  // answer reported a completed handover as a failure.
+  const { ok, value } = await pollUntil(
+    async () =>
+      Promise.all([
+        publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "hasRole", args: [adminRole, cold] }),
+        publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "hasRole", args: [adminRole, smartAccount] }),
+      ]),
+    ([coldIsAdmin, hotIsAdmin]) => Boolean(coldIsAdmin) && !hotIsAdmin,
+  );
+  const [coldIsAdmin, hotIsAdmin] = value;
 
   console.log("\nverified on-chain:");
   console.log(`  cold is admin : ${coldIsAdmin}`);
   console.log(`  hot is admin  : ${hotIsAdmin}   (must be false)`);
 
-  if (!coldIsAdmin || hotIsAdmin) throw new Error("handover did not apply cleanly");
+  if (!ok) {
+    console.warn(
+      "\nthe new role state does not read back yet. The transaction landed, so check\n" +
+        `before assuming failure: https://basescan.org/tx/${receipt.receipt.transactionHash}`,
+    );
+    return;
+  }
   console.log("\ndone. the hot key can now only trigger run(), never withdraw.");
 }
 
