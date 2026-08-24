@@ -1,0 +1,31 @@
+{
+  "name": "agentflash-loan-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "observe": "tsx src/observe.ts",
+    "verify:addresses": "tsx src/verifyAddresses.ts",
+    "deploy": "tsx src/deploySponsored.ts",
+    "configure": "tsx src/configure.ts",
+    "handover": "tsx src/handover.ts",
+    "live": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "5.1.0",
+    "@zerodev/ecdsa-validator": "^5.4.9",
+    "@zerodev/sdk": "^5.4.32",
+    "dotenv": "^16.4.5",
+    "solc": "0.8.26",
+    "viem": "^2.21.45"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
