@@ -1,41 +1,26 @@
 import { createPublicClient, http } from "viem";
 import { base } from "viem/chains";
 import { config, requireTradingConfig } from "./config.js";
-import { observe, describe, PAIR_WETH_USDC } from "./scanner/dexArb.js";
+import { observe, describe } from "./scanner/dexArb.js";
 import { screen } from "./risk/guards.js";
 import { operatorAddress } from "./exec/direct.js";
-
-/**
- * PHASE 1 -- LIVE EXECUTION. NOT READY.
- *
- * Everything needed to *decide* is here. What is deliberately missing is the
- * plan builder: turning an Observation into the exact approvals + swap calldata
- * for FlashExecutor.run().
- *
- * That is left unwritten on purpose. It is the one piece that moves real money
- * through untested calldata, and it must be fork-tested against live Uniswap /
- * Aerodrome pools before it exists -- not written from memory and hoped over.
- *
- * Run `npm run observe` (Phase 0) first. If the CSV shows nothing ever clears
- * gas, this file should never be finished.
- */
-
-function buildPlan(): never {
-  throw new Error(
-    "Plan builder not implemented.\n" +
-      "Phase 1 needs fork-tested swap calldata for each venue before it can send " +
-      "a transaction. Run `npm run observe` and read docs/PHASE0.md first.",
-  );
-}
+import { BASE } from "./chain/addresses.js";
+import { buildArbPlan } from "./plan/build.js";
+import { Provider } from "./abi/flashExecutor.js";
+import { preflight } from "./sim/preflight.js";
+import { execute } from "./exec/index.js";
 
 async function main() {
-  // Phase 1 moves money. Refuse to start without caps configured.
   requireTradingConfig();
 
-  const client = createPublicClient({ chain: base, transport: http(config.rpcUrl) });
+  const client = createPublicClient({
+    chain: base,
+    transport: http(config.rpcUrl),
+  });
+
   const operator = operatorAddress();
 
-  console.log("agentflash-loan — PHASE 1 (live)");
+  console.log("agentflash-loan — PHASE 1");
   console.log(`  operator  : ${operator}`);
   console.log(`  executor  : ${config.executor}`);
   console.log(`  exec mode : ${config.execMode}`);
@@ -43,28 +28,76 @@ async function main() {
 
   const fees = await client.estimateFeesPerGas();
   const maxFeePerGas = fees.maxFeePerGas ?? 0n;
+  const maxPriorityFeePerGas = fees.maxPriorityFeePerGas ?? 0n;
 
+  // USDC -> WETH -> USDC
   const scan = await observe(client, {
-    ...PAIR_WETH_USDC,
-    sizes: [10n ** 18n],
-    flashFeeBps: 0,
+    base: BASE.tokens.USDC,
+    quote: BASE.tokens.WETH,
+    sizes: [10_000_000_000n], // 10,000 USDC
+    flashFeeBps: 5,
   });
-  console.log(`  quotes    : ${scan.quotesAttempted} (rpc errors: ${scan.rpcErrors})`);
+
+  console.log(
+    `  quotes    : ${scan.quotesAttempted} (rpc errors: ${scan.rpcErrors})`,
+  );
 
   for (const o of scan.observations.slice(0, 3)) {
+    console.log(`\n[OPPORTUNITY] ${describe(o)}`);
+
+    const plan = buildArbPlan({
+      observation: o,
+      executor: config.executor,
+      minProfitWei: 1n,
+    });
+
+    // Keep the requested USDC flash-loan route.
+    plan.provider = Provider.AAVE_V3;
+    plan.asset = BASE.tokens.USDC;
+    plan.amount = o.amountIn;
+
     const verdict = screen({
-      plan: { provider: 1, asset: o.base, amount: o.amountIn, minProfit: 1n, approvals: [], calls: [] },
+      plan,
       expectedProfitWei: o.netBeforeGasWei > 0n ? o.netBeforeGasWei : 0n,
       gasEstimate: 450_000n,
       maxFeePerGas,
       consecutiveFailures: 0,
     });
-    console.log(`${verdict.ok ? "[would try]" : "[skip]"} ${describe(o)}` + (verdict.ok ? "" : ` — ${verdict.reason}`));
-    if (verdict.ok) buildPlan();
+
+    if (!verdict.ok) {
+      console.log(`[skip] ${verdict.reason}`);
+      continue;
+    }
+
+    console.log("[would try] risk checks passed");
+
+    const pf = await preflight(client, plan, operator);
+
+    if (!pf.ok) {
+      console.log(`[preflight FAIL] ${pf.revert}`);
+      continue;
+    }
+
+    console.log(`[preflight OK] gas=${pf.gasEstimate}`);
+
+    if (config.dryRun) {
+      console.log("[DRY RUN] TX NOT BROADCAST");
+      continue;
+    }
+
+    const txHash = await execute({
+      chain: base,
+      plan,
+      gasLimit: pf.gasEstimate,
+      maxFeePerGas,
+      maxPriorityFeePerGas,
+    });
+
+    console.log(`[TX SENT] ${txHash}`);
   }
 }
 
 main().catch((e) => {
-  console.error(e.message);
+  console.error(e);
   process.exit(1);
 });

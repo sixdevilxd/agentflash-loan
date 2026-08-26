@@ -22,7 +22,8 @@ import { pollUntil } from "./chain/rpc.js";
 const EXECUTOR = process.env.EXECUTOR_ADDRESS as Address | undefined;
 
 /** Per-asset borrow ceiling. 0 would mean "not borrowable", so it must be set. */
-const MAX_LOAN_WEI = BigInt(process.env.MAX_LOAN_WEI ?? "50000000000000000000"); // 50 WETH
+const MAX_LOAN_WETH = BigInt(process.env.MAX_LOAN_WETH ?? "50000000000000000000"); // 50 WETH
+const MAX_LOAN_USDC = BigInt(process.env.MAX_LOAN_USDC ?? "200000000000"); // 200,000 USDC
 
 async function main() {
   if (!EXECUTOR) {
@@ -65,10 +66,17 @@ async function main() {
       to: EXECUTOR, value: 0n,
       data: encodeFunctionData({
         abi: flashExecutorAbi, functionName: "setMaxLoan",
-        args: [BASE.tokens.WETH, MAX_LOAN_WEI],
+        args: [BASE.tokens.WETH, MAX_LOAN_WETH],
       }),
     },
-    ...routers.map((r) => ({
+          {
+        to: EXECUTOR, value: 0n,
+        data: encodeFunctionData({
+          abi: flashExecutorAbi, functionName: "setMaxLoan",
+          args: [BASE.tokens.USDC, MAX_LOAN_USDC],
+        }),
+      },
+      ...routers.map((r) => ({
       to: EXECUTOR, value: 0n,
       data: encodeFunctionData({ abi: flashExecutorAbi, functionName: "setTarget", args: [r, true] }),
     })),
@@ -83,7 +91,8 @@ async function main() {
 
   console.log(`executor      : ${EXECUTOR}`);
   console.log(`admin (caller): ${smartAccount}`);
-  console.log(`max loan      : ${formatEther(MAX_LOAN_WEI)} WETH`);
+  console.log(`max loan WETH : ${formatEther(MAX_LOAN_WETH)} WETH`);
+console.log(`max loan USDC : ${Number(MAX_LOAN_USDC) / 1e6} USDC`);
   console.log(`routers       : ${routers.join(", ")}`);
   console.log(`operator      : ${smartAccount}`);
   console.log(`\nsending ${calls.length} calls as one sponsored UserOperation...`);
@@ -100,6 +109,7 @@ async function main() {
   const readAll = async () =>
     Promise.all([
       publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "maxLoan", args: [BASE.tokens.WETH] }),
+      publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "maxLoan", args: [BASE.tokens.USDC] }),
       publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "allowedTarget", args: [routers[0] as Address] }),
       publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "allowedTarget", args: [routers[1] as Address] }),
       publicClient.readContract({ address: EXECUTOR, abi: flashExecutorAbi, functionName: "hasRole", args: [operatorRole as `0x${string}`, smartAccount] }),
@@ -109,10 +119,11 @@ async function main() {
     readAll,
     ([cap, r0, r1, isOp]) => Boolean(cap && r0 && r1 && isOp),
   );
-  const [cap, r0, r1, isOperator] = value;
+  const [capWeth, capUsdc, r0, r1, isOperator] = value;
 
   console.log("\nverified on-chain:");
-  console.log(`  maxLoan(WETH)        ${formatEther(cap as bigint)} WETH`);
+  console.log(`  maxLoan(WETH)        ${formatEther(capWeth as bigint)} WETH`);
+console.log(`  maxLoan(USDC)        ${Number(capUsdc as bigint) / 1e6} USDC`);
   console.log(`  allowed uniV3 router ${r0}`);
   console.log(`  allowed aerodrome    ${r1}`);
   console.log(`  operator granted     ${isOperator}`);

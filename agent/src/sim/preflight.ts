@@ -26,7 +26,7 @@ export function makeClient(): PublicClient {
  * attempts that are already dead, so we do not pay gas to learn that.
  */
 export async function preflight(
-  client: PublicClient,
+  client: any,
   plan: Plan,
   operator: Address,
 ): Promise<Preflight> {

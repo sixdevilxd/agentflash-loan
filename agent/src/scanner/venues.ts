@@ -93,8 +93,49 @@ function aerodrome(stable: boolean): Venue {
   };
 }
 
+function pancakeV3(fee: number): Venue {
+  return {
+    id: `pancakeV3-${fee}`,
+    spender: BASE.pancakeV3.router,
+    async quote(client, tokenIn, tokenOut, amountIn, blockNumber) {
+      try {
+        const { result } = await withRetry(() =>
+          client.simulateContract({
+            address: BASE.pancakeV3.quoterV2,
+            abi: quoterV2Abi,
+            functionName: "quoteExactInputSingle",
+            args: [{
+              tokenIn,
+              tokenOut,
+              amountIn,
+              fee,
+              sqrtPriceLimitX96: 0n,
+            }],
+            blockNumber,
+          } as never),
+        );
+
+        const amount = (result as readonly bigint[])[0];
+
+        if (amount === undefined || amount === 0n)
+          return { ok: false, kind: "no-pool" };
+
+        return { ok: true, amount };
+      } catch (e) {
+        const { kind, detail } = classify(e);
+        return { ok: false, kind, detail };
+      }
+    },
+  };
+}
+
 export const VENUES: Venue[] = [
   ...BASE.uniV3.feeTiers.map((f) => uniV3(f)),
+
+  ...BASE.pancakeV3.feeTiers.map((f) => pancakeV3(f)),
+
   aerodrome(false),
   aerodrome(true),
+
+  // Sushi V3 intentionally disabled until independently verified.
 ];
